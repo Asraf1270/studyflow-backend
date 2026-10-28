@@ -15,6 +15,7 @@ return Application::configure(basePath: dirname(__DIR__))
         //
     })
     ->withExceptions(function (Exceptions $exceptions) {
+        // ADD THIS IF MISSING:
         $exceptions->shouldRenderJsonWhen(function (\Illuminate\Http\Request $request) {
             return $request->is('api/*') || $request->expectsJson();
         });
