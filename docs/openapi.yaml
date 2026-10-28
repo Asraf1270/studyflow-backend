@@ -1,0 +1,791 @@
+openapi: 3.1.0
+info:
+  title: StudyFlow API
+  version: 1.0.0
+  description: Student productivity API. All timestamps UTC ISO-8601. Auth via Sanctum bearer token.
+
+servers:
+  - url: http://localhost:8000/api/v1
+    description: Local
+  - url: https://api.studyflow.example/api/v1
+    description: Production (placeholder — replace before deploy)
+
+security:
+  - Sanctum: []
+
+components:
+  securitySchemes:
+    Sanctum:
+      type: http
+      scheme: bearer
+      bearerFormat: Sanctum
+
+  schemas:
+    User:
+      type: object
+      required: [id, name, email]
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        email: { type: string, format: email }
+        created_at: { type: string, format: date-time }
+
+    Course:
+      type: object
+      required: [id, name, color]
+      properties:
+        id: { type: integer }
+        name: { type: string, maxLength: 120 }
+        code: { type: string, nullable: true }
+        semester: { type: string, nullable: true }
+        color: { type: string, pattern: '^#[0-9A-Fa-f]{6}$' }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    CourseInput:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, maxLength: 120 }
+        code: { type: string, maxLength: 30, nullable: true }
+        semester: { type: string, maxLength: 40, nullable: true }
+        color: { type: string, pattern: '^#[0-9A-Fa-f]{6}$' }
+
+    ClassSchedule:
+      type: object
+      required: [id, course_id, day_of_week, start_time, end_time]
+      properties:
+        id: { type: integer }
+        course_id: { type: integer }
+        day_of_week: { type: integer, minimum: 1, maximum: 7 }
+        start_time: { type: string, pattern: '^([01]\\d|2[0-3]):[0-5]\\d$' }
+        end_time:   { type: string, pattern: '^([01]\\d|2[0-3]):[0-5]\\d$' }
+        location: { type: string, nullable: true }
+        instructor: { type: string, nullable: true }
+        reminder_offset_minutes: { type: integer, nullable: true }
+
+    Task:
+      type: object
+      required: [id, title, status, priority]
+      properties:
+        id: { type: integer }
+        course_id: { type: integer, nullable: true }
+        title: { type: string }
+        description: { type: string, nullable: true }
+        due_at: { type: string, format: date-time, nullable: true }
+        priority: { type: string, enum: [low, medium, high] }
+        status: { type: string, enum: [pending, in_progress, completed] }
+        reminder_at: { type: string, format: date-time, nullable: true }
+        completed_at: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time }
+
+    Exam:
+      type: object
+      required: [id, course_id, title, exam_at]
+      properties:
+        id: { type: integer }
+        course_id: { type: integer }
+        title: { type: string }
+        exam_at: { type: string, format: date-time }
+        location: { type: string, nullable: true }
+        notes: { type: string, nullable: true }
+        topics:
+          type: array
+          items: { $ref: '#/components/schemas/ExamTopic' }
+
+    ExamTopic:
+      type: object
+      properties:
+        id: { type: integer }
+        title: { type: string }
+        is_completed: { type: boolean }
+
+    Note:
+      type: object
+      required: [id, title]
+      properties:
+        id: { type: integer }
+        course_id: { type: integer, nullable: true }
+        title: { type: string }
+        content: { type: string, nullable: true }
+        is_favorite: { type: boolean }
+        last_edited_at: { type: string, format: date-time, nullable: true }
+
+    StudySession:
+      type: object
+      properties:
+        id: { type: integer }
+        course_id: { type: integer, nullable: true }
+        client_session_id: { type: string, format: uuid }
+        started_at: { type: string, format: date-time }
+        ended_at: { type: string, format: date-time, nullable: true }
+        duration_seconds: { type: integer, nullable: true }
+
+    Dashboard:
+      type: object
+      properties:
+        todays_classes: { type: array, items: { $ref: '#/components/schemas/ClassSchedule' } }
+        pending_tasks: { type: array, items: { $ref: '#/components/schemas/Task' } }
+        upcoming_exams: { type: array, items: { $ref: '#/components/schemas/Exam' } }
+        study_seconds_today: { type: integer }
+        study_seconds_week: { type: integer }
+        tasks_completed_week: { type: integer }
+
+    ValidationError:
+      type: object
+      properties:
+        message: { type: string, example: "The given data was invalid." }
+        errors:
+          type: object
+          additionalProperties:
+            type: array
+            items: { type: string }
+
+    PaginatedMeta:
+      type: object
+      properties:
+        current_page: { type: integer }
+        per_page: { type: integer }
+        total: { type: integer }
+        last_page: { type: integer }
+
+  responses:
+    Unauthorized:
+      description: Missing or invalid token
+      content:
+        application/json:
+          schema: { type: object, properties: { message: { type: string } } }
+    Forbidden:
+      description: Authenticated but not allowed
+    NotFound:
+      description: Resource does not exist or not owned by caller
+    ValidationFailed:
+      description: 422
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ValidationError' }
+    TooManyRequests:
+      description: 429 rate limited
+
+paths:
+  /auth/register:
+    post:
+      tags: [Auth]
+      security: []
+      summary: Create account and receive token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, email, password, password_confirmation]
+              properties:
+                name: { type: string }
+                email: { type: string, format: email }
+                password: { type: string, minLength: 8 }
+                password_confirmation: { type: string }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      user: { $ref: '#/components/schemas/User' }
+                      token: { type: string }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      security: []
+      summary: Login and receive token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password, device_name]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string }
+                device_name: { type: string, example: "android-pixel-7" }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      user: { $ref: '#/components/schemas/User' }
+                      token: { type: string }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /auth/logout:
+    post:
+      tags: [Auth]
+      summary: Revoke current token
+      responses:
+        '204': { description: No Content }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /me:
+    get:
+      tags: [Profile]
+      summary: Current user
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/User' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    patch:
+      tags: [Profile]
+      summary: Update profile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+                email: { type: string, format: email }
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/User' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /me/password:
+    post:
+      tags: [Profile]
+      summary: Change password
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [current_password, password, password_confirmation]
+              properties:
+                current_password: { type: string }
+                password: { type: string, minLength: 8 }
+                password_confirmation: { type: string }
+      responses:
+        '204': { description: No Content }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /courses:
+    get:
+      tags: [Courses]
+      summary: List courses
+      parameters:
+        - { in: query, name: semester, schema: { type: string } }
+        - { in: query, name: page, schema: { type: integer } }
+        - { in: query, name: per_page, schema: { type: integer, default: 15, maximum: 100 } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/Course' } }
+                  meta: { $ref: '#/components/schemas/PaginatedMeta' }
+    post:
+      tags: [Courses]
+      summary: Create course
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CourseInput' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Course' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /courses/{id}:
+    parameters:
+      - { in: path, name: id, required: true, schema: { type: integer } }
+    get:
+      tags: [Courses]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Course' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [Courses]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CourseInput' }
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Course' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+    delete:
+      tags: [Courses]
+      responses:
+        '204': { description: Deleted }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /schedules:
+    get:
+      tags: [Schedules]
+      parameters:
+        - { in: query, name: day_of_week, schema: { type: integer, minimum: 1, maximum: 7 } }
+        - { in: query, name: course_id, schema: { type: integer } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/ClassSchedule' } }
+    post:
+      tags: [Schedules]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [course_id, day_of_week, start_time, end_time]
+              properties:
+                course_id: { type: integer }
+                day_of_week: { type: integer, minimum: 1, maximum: 7 }
+                start_time: { type: string }
+                end_time: { type: string }
+                location: { type: string, nullable: true }
+                instructor: { type: string, nullable: true }
+                reminder_offset_minutes: { type: integer, nullable: true }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/ClassSchedule' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /schedules/{id}:
+    parameters:
+      - { in: path, name: id, required: true, schema: { type: integer } }
+    patch:
+      tags: [Schedules]
+      responses:
+        '200': { description: Updated }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+    delete:
+      tags: [Schedules]
+      responses:
+        '204': { description: Deleted }
+
+  /schedules/today:
+    get:
+      tags: [Schedules]
+      summary: Today's classes (server local day, user time zone)
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/ClassSchedule' } }
+
+  /tasks:
+    get:
+      tags: [Tasks]
+      parameters:
+        - { in: query, name: status, schema: { type: string, enum: [pending, in_progress, completed] } }
+        - { in: query, name: course_id, schema: { type: integer } }
+        - { in: query, name: overdue, schema: { type: boolean } }
+        - { in: query, name: search, schema: { type: string } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/Task' } }
+                  meta: { $ref: '#/components/schemas/PaginatedMeta' }
+    post:
+      tags: [Tasks]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title]
+              properties:
+                title: { type: string }
+                description: { type: string, nullable: true }
+                course_id: { type: integer, nullable: true }
+                due_at: { type: string, format: date-time, nullable: true }
+                priority: { type: string, enum: [low, medium, high] }
+                reminder_at: { type: string, format: date-time, nullable: true }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Task' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /tasks/{id}:
+    parameters:
+      - { in: path, name: id, required: true, schema: { type: integer } }
+    get:
+      tags: [Tasks]
+      responses:
+        '200': { description: OK }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    patch:
+      tags: [Tasks]
+      responses:
+        '200': { description: Updated }
+    delete:
+      tags: [Tasks]
+      responses:
+        '204': { description: Deleted }
+
+  /tasks/{id}/status:
+    parameters:
+      - { in: path, name: id, required: true, schema: { type: integer } }
+    patch:
+      tags: [Tasks]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status: { type: string, enum: [pending, in_progress, completed] }
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Task' }
+
+  /exams:
+    get:
+      tags: [Exams]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/Exam' } }
+    post:
+      tags: [Exams]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [course_id, title, exam_at]
+              properties:
+                course_id: { type: integer }
+                title: { type: string }
+                exam_at: { type: string, format: date-time }
+                location: { type: string, nullable: true }
+                notes: { type: string, nullable: true }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Exam' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /exams/{id}:
+    parameters:
+      - { in: path, name: id, required: true, schema: { type: integer } }
+    get:
+      tags: [Exams]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Exam' }
+    patch:
+      tags: [Exams]
+      responses:
+        '200': { description: Updated }
+    delete:
+      tags: [Exams]
+      responses:
+        '204': { description: Deleted }
+
+  /exams/{id}/topics:
+    parameters:
+      - { in: path, name: id, required: true, schema: { type: integer } }
+    post:
+      tags: [Exams]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title]
+              properties:
+                title: { type: string }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/ExamTopic' }
+
+  /exam-topics/{id}:
+    parameters:
+      - { in: path, name: id, required: true, schema: { type: integer } }
+    patch:
+      tags: [Exams]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title: { type: string }
+                is_completed: { type: boolean }
+      responses:
+        '200': { description: Updated }
+    delete:
+      tags: [Exams]
+      responses:
+        '204': { description: Deleted }
+
+  /notes:
+    get:
+      tags: [Notes]
+      parameters:
+        - { in: query, name: q, schema: { type: string } }
+        - { in: query, name: course_id, schema: { type: integer } }
+        - { in: query, name: favorite, schema: { type: boolean } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/Note' } }
+                  meta: { $ref: '#/components/schemas/PaginatedMeta' }
+    post:
+      tags: [Notes]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title]
+              properties:
+                title: { type: string }
+                content: { type: string, nullable: true }
+                course_id: { type: integer, nullable: true }
+                is_favorite: { type: boolean }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Note' }
+
+  /notes/{id}:
+    parameters:
+      - { in: path, name: id, required: true, schema: { type: integer } }
+    get:
+      tags: [Notes]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Note' }
+    patch:
+      tags: [Notes]
+      responses:
+        '200': { description: Updated }
+    delete:
+      tags: [Notes]
+      responses:
+        '204': { description: Deleted }
+
+  /study-sessions/start:
+    post:
+      tags: [StudySessions]
+      summary: Begin a study session (idempotent via client_session_id)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [client_session_id]
+              properties:
+                client_session_id: { type: string, format: uuid }
+                course_id: { type: integer, nullable: true }
+      responses:
+        '200':
+          description: Existing session returned (idempotent)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/StudySession' }
+        '201':
+          description: New session created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/StudySession' }
+
+  /study-sessions/{id}/end:
+    parameters:
+      - { in: path, name: id, required: true, schema: { type: integer } }
+    post:
+      tags: [StudySessions]
+      summary: Close a study session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ended_at]
+              properties:
+                ended_at: { type: string, format: date-time }
+      responses:
+        '200':
+          description: Closed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/StudySession' }
+        '409':
+          description: Session already ended
+
+  /study-sessions:
+    get:
+      tags: [StudySessions]
+      parameters:
+        - { in: query, name: from, schema: { type: string, format: date } }
+        - { in: query, name: to, schema: { type: string, format: date } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/StudySession' } }
+                  meta: { $ref: '#/components/schemas/PaginatedMeta' }
+
+  /dashboard:
+    get:
+      tags: [Dashboard]
+      summary: Aggregated dashboard payload
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Dashboard' }
