@@ -1,6 +1,11 @@
 <?php
 
 use App\Http\Controllers\Api\V1\AuthController;
+use App\Http\Controllers\Api\V1\CourseController;
+use App\Http\Controllers\Api\V1\DashboardController;
+use App\Http\Controllers\Api\V1\ProfileController;
+use App\Http\Controllers\Api\V1\ScheduleController;
+use App\Http\Controllers\Api\V1\TaskController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('v1')->group(function () {
@@ -15,10 +20,13 @@ Route::prefix('v1')->group(function () {
         Route::patch('/me',         [ProfileController::class, 'update']);
         Route::post('/me/password', [ProfileController::class, 'changePassword']);
         Route::apiResource('courses', CourseController::class);
+        // Schedules
         Route::get('/schedules/today', [ScheduleController::class, 'today']);
         Route::apiResource('schedules', ScheduleController::class);
+        // Tasks
         Route::patch('/tasks/{task}/status', [TaskController::class, 'updateStatus']);
         Route::apiResource('tasks', TaskController::class);
+        // Dahsboard
+        Route::get('/dashboard', [DashboardController::class, 'show']);
     });
-    Route::get('/dashboard', [DashboardController::class, 'show']);
 });
