@@ -15,5 +15,10 @@ Route::prefix('v1')->group(function () {
         Route::patch('/me',         [ProfileController::class, 'update']);
         Route::post('/me/password', [ProfileController::class, 'changePassword']);
         Route::apiResource('courses', CourseController::class);
+        Route::get('/schedules/today', [ScheduleController::class, 'today']);
+        Route::apiResource('schedules', ScheduleController::class);
+        Route::patch('/tasks/{task}/status', [TaskController::class, 'updateStatus']);
+        Route::apiResource('tasks', TaskController::class);
     });
+    Route::get('/dashboard', [DashboardController::class, 'show']);
 });
