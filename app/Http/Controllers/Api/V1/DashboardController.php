@@ -25,13 +25,7 @@ class DashboardController extends Controller
             'data' => [
                 'todays_classes'       => ClassScheduleResource::collection($data['todays_classes']),
                 'pending_tasks'        => TaskResource::collection($data['pending_tasks']),
-                'upcoming_exams'       => $data['upcoming_exams']->map(fn ($e) => [
-                    'id'       => $e->id,
-                    'course_id'=> $e->course_id,
-                    'title'    => $e->title,
-                    'exam_at'  => $e->exam_at?->toIso8601String(),
-                    'location' => $e->location,
-                ]),
+                'upcoming_exams' => ExamResource::collection($data['upcoming_exams']),
                 'study_seconds_today'  => $data['study_seconds_today'],
                 'study_seconds_week'   => $data['study_seconds_week'],
                 'tasks_completed_week' => $data['tasks_completed_week'],
